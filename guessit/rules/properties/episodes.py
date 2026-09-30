@@ -16,6 +16,7 @@ from rebulk.remodule import re
 from rebulk.utils import is_iterable
 
 from guessit.rules import match_processors
+from guessit.rules.common.expected import build_expected_function
 from guessit.rules.common.numeral import numeral, parse_numeral
 
 from ...reutils import build_or_pattern
@@ -45,6 +46,7 @@ _CJK_DIGITS = {
 }
 
 _SEPS_RE = re.compile(rf"[{re.escape(seps)}]+")
+_EXPECTED_TITLE = build_expected_function("expected_title")
 
 # ASCII digits or Han numerals up to 99 (十一 -> 11, 二十三 -> 23, single digit otherwise).
 cjk_number = r"(?:\d{1,4}|[一二两三四五六七八九]?十[一二两三四五六七八九]?|[零一二两三四五六七八九])"
@@ -1135,6 +1137,7 @@ class RemoveMisleadingLoneDigitEpisode(Rule):
 
     def when(self, matches: Matches, context: dict[str, Any] | None) -> Any:
         to_remove: list[Match] = []
+        expected_title_spans = self._expected_title_spans(matches, context)
         fileparts = matches.markers.named("path")
         for index, filepart in enumerate(fileparts):
             episodes_ = sorted(
@@ -1147,7 +1150,8 @@ class RemoveMisleadingLoneDigitEpisode(Rule):
                 for episode in episodes_
                 if self._is_lone_digit(episode)
                 and (
-                    self._numbers_something_else(matches, episode, in_final_part) or self._fraction_of_a_number(episode)
+                    self._numbers_something_else(matches, episode, in_final_part)
+                    or self._fraction_of_a_number(episode, expected_title_spans)
                 )
             ]
             kept = [episode for episode in episodes_ if episode not in misplaced]
@@ -1169,10 +1173,33 @@ class RemoveMisleadingLoneDigitEpisode(Rule):
         return not in_final_part or bool(quoted)
 
     @staticmethod
-    def _fraction_of_a_number(episode: Match) -> bool:
+    def _fraction_of_a_number(episode: Match, expected_title_spans: list[tuple[int, int]]) -> bool:
         """A digit behind the dot of a decimal number ("02.5"): a half episode, not a second one."""
         before = (episode.input_string or "")[: episode.start]
-        return len(before) > 1 and before[-1] == "." and before[-2].isdigit()
+        if not (len(before) > 1 and before[-1] == "." and before[-2].isdigit()):
+            return False
+
+        integer_tail = episode.start - 2
+        return not any(start <= integer_tail < end for start, end in expected_title_spans)
+
+    @staticmethod
+    def _expected_title_spans(matches: Matches, context: dict[str, Any] | None) -> list[tuple[int, int]]:
+        if not context or not context.get("expected_title"):
+            return []
+
+        input_string = getattr(matches, "input_string", None)
+        if not input_string:
+            return []
+
+        spans: list[tuple[int, int]] = []
+        for expected_match in _EXPECTED_TITLE(input_string, context):
+            if isinstance(expected_match, tuple):
+                start, end = expected_match
+            else:
+                start = expected_match["start"]
+                end = expected_match["end"]
+            spans.append((start, end))
+        return spans
 
     @classmethod
     def _detached_from_list(cls, episodes_: list[Match]) -> list[Match]:

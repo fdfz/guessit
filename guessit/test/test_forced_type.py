@@ -170,3 +170,16 @@ def test_forced_episode_keeps_a_lone_digit_out_of_other_properties(name: str, ex
     result = guessit(name, {"type": "episode"})
     for prop, value in expected.items():
         assert result.get(prop) == value, f"{prop}: {result.get(prop)!r} != {value!r} in {dict(result)}"
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("Foo.2.2", {"title": "Foo 2", "episode": 2}),
+        ("Foo.2.2.bar", {"title": "Foo 2", "episode": 2, "episode_title": "bar"}),
+    ],
+)
+def test_forced_episode_with_expected_title_keeps_trailing_integer(name: str, expected: dict[str, object]) -> None:
+    result = guessit(name, {"expected_title": ["re:Foo 2"], "type": "episode"})
+    for prop, value in expected.items():
+        assert result.get(prop) == value, f"{prop}: {result.get(prop)!r} != {value!r} in {dict(result)}"
